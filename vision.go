@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"log/slog"
 )
 
 // VisionConfig holds configuration for a VisionClient.
@@ -16,16 +15,18 @@ type VisionConfig struct {
 
 // VisionClient queries a vision model with images via the Responses API.
 type VisionClient struct {
-	cfg   VisionConfig
-	doer  HTTPDoer
-	usage Usage
+	cfg      VisionConfig
+	doer     HTTPDoer
+	listener *VisionListener
+	usage    Usage
 }
 
 // NewVisionClient creates a VisionClient.
-func NewVisionClient(cfg VisionConfig, doer HTTPDoer) *VisionClient {
+func NewVisionClient(cfg VisionConfig, doer HTTPDoer, listener *VisionListener) *VisionClient {
 	return &VisionClient{
-		cfg:  cfg,
-		doer: doer,
+		cfg:      cfg,
+		doer:     doer,
+		listener: listener,
 	}
 }
 
@@ -61,7 +62,7 @@ func (v *VisionClient) QueryImage(ctx context.Context, imageData []byte, mimeTyp
 		return "", fmt.Errorf("vision: no text in response")
 	}
 
-	slog.Info("vision response", "text", text)
+	v.listener.response(VisionResponseEvent{Text: text, Tokens: res.Usage})
 	return text, nil
 }
 

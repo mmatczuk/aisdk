@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -35,15 +34,17 @@ type ImageGenConfig struct {
 
 // ImageGenClient generates and edits images via OpenRouter's Gemini image model.
 type ImageGenClient struct {
-	cfg  ImageGenConfig
-	doer HTTPDoer
+	cfg      ImageGenConfig
+	doer     HTTPDoer
+	listener *ImageListener
 }
 
 // NewImageClient creates an ImageGenClient.
-func NewImageClient(cfg ImageGenConfig, doer HTTPDoer) *ImageGenClient {
+func NewImageClient(cfg ImageGenConfig, doer HTTPDoer, listener *ImageListener) *ImageGenClient {
 	return &ImageGenClient{
-		cfg:  cfg,
-		doer: doer,
+		cfg:      cfg,
+		doer:     doer,
+		listener: listener,
 	}
 }
 
@@ -72,14 +73,11 @@ func (c *ImageGenClient) requestImage(
 	opts ImageOptions,
 	action string,
 ) (string, error) {
-	preview := prompt
-	if len(preview) > 100 {
-		preview = preview[:100]
-	}
-	if len(refs) > 0 {
-		preview = fmt.Sprintf("%d ref image(s)", len(refs))
-	}
-	slog.Info("image request", "action", action, "preview", preview)
+	c.listener.started(ImageStartedEvent{
+		Action: action,
+		Prompt: prompt,
+		Refs:   len(refs),
+	})
 
 	data, err := c.callOpenRouter(ctx, prompt, refs, opts)
 	if err != nil {
@@ -96,7 +94,11 @@ func (c *ImageGenClient) requestImage(
 		return "", err
 	}
 
-	slog.Info("image done", "action", action, "filename", filename, "mimeType", mimeType)
+	c.listener.completed(ImageCompletedEvent{
+		Action:   action,
+		Filename: filename,
+		MimeType: mimeType,
+	})
 	return filename, nil
 }
 

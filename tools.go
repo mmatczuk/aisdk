@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
 )
@@ -23,12 +23,14 @@ type Tools struct {
 	native   []toolDef
 	mcp      []json.RawMessage // raw JSON tool definitions from MCP servers
 	handlers map[string]func(ctx context.Context, args json.RawMessage) any
+	listener *ToolListener
 }
 
 // NewTools creates an empty tool registry.
-func NewTools() *Tools {
+func NewTools(listener *ToolListener) *Tools {
 	return &Tools{
 		handlers: make(map[string]func(ctx context.Context, args json.RawMessage) any),
+		listener: listener,
 	}
 }
 
@@ -99,7 +101,11 @@ func (t *Tools) execute(ctx context.Context, calls []apiOutputItem) []M {
 
 			handler, ok := t.handlers[call.Name]
 			if !ok {
-				slog.Warn("unknown tool", "name", call.Name)
+				t.listener.toolCalled(ToolCalledEvent{Name: call.Name, Args: call.Arguments})
+				t.listener.toolCompleted(ToolCompletedEvent{
+					Name: call.Name,
+					Err:  fmt.Sprintf("unknown tool: %s", call.Name),
+				})
 				results[i] = M{
 					"type":    "function_call_output",
 					"call_id": call.CallID,
@@ -108,10 +114,18 @@ func (t *Tools) execute(ctx context.Context, calls []apiOutputItem) []M {
 				return
 			}
 
-			slog.Info("tool call", "name", call.Name, "args", call.Arguments)
+			t.listener.toolCalled(ToolCalledEvent{Name: call.Name, Args: call.Arguments})
+
+			start := time.Now()
 			result := handler(ctx, json.RawMessage(call.Arguments))
+			duration := time.Since(start)
+
 			output, _ := json.Marshal(result)
-			slog.Info("tool result", "name", call.Name, "result", string(output))
+			t.listener.toolCompleted(ToolCompletedEvent{
+				Name:     call.Name,
+				Result:   string(output),
+				Duration: duration,
+			})
 
 			results[i] = M{
 				"type":    "function_call_output",

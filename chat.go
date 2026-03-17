@@ -3,7 +3,6 @@ package aisdk
 import (
 	"context"
 	"fmt"
-	"log/slog"
 )
 
 // ChatResult is returned by UserMessage after the model produces a final text
@@ -26,20 +25,22 @@ type ChatConfig struct {
 // Chat manages a persistent conversation with the Responses API,
 // including automatic tool dispatch.
 type Chat struct {
-	cfg   ChatConfig
-	tools *Tools
-	doer  HTTPDoer
+	cfg      ChatConfig
+	tools    *Tools
+	doer     HTTPDoer
+	listener *ChatListener
 
 	history []M
 	usage   Usage
 }
 
 // NewChat creates a Chat.
-func NewChat(cfg ChatConfig, tools *Tools, doer HTTPDoer) *Chat {
+func NewChat(cfg ChatConfig, tools *Tools, doer HTTPDoer, listener *ChatListener) *Chat {
 	c := &Chat{
-		cfg:   cfg,
-		tools: tools,
-		doer:  doer,
+		cfg:      cfg,
+		tools:    tools,
+		doer:     doer,
+		listener: listener,
 	}
 
 	if cfg.System != "" {
@@ -55,6 +56,8 @@ func NewChat(cfg ChatConfig, tools *Tools, doer HTTPDoer) *Chat {
 // UserMessage sends a user message and runs the tool-calling loop until the
 // model produces a text response or maxTurns is exhausted.
 func (c *Chat) UserMessage(ctx context.Context, text string) (ChatResult, error) {
+	c.listener.agentStarted(AgentStartedEvent{Message: text})
+
 	c.history = append(c.history, M{
 		"role":    "user",
 		"content": text,
@@ -62,9 +65,13 @@ func (c *Chat) UserMessage(ctx context.Context, text string) (ChatResult, error)
 
 	var res ChatResult
 	for turn := 0; turn < c.cfg.MaxTurns; turn++ {
+		c.listener.turnStarted(TurnStartedEvent{Turn: turn + 1})
+
 		apiRes, err := c.callAPI(ctx)
 		if err != nil {
-			return res, fmt.Errorf("turn %d: %w", turn+1, err)
+			err = fmt.Errorf("turn %d: %w", turn+1, err)
+			c.listener.agentFailed(AgentFailedEvent{Err: err, Turn: turn + 1})
+			return res, err
 		}
 
 		toolCalls := filterToolCalls(apiRes.Output)
@@ -72,7 +79,15 @@ func (c *Chat) UserMessage(ctx context.Context, text string) (ChatResult, error)
 
 		if len(toolCalls) == 0 {
 			res.Text = apiRes.text()
-			slog.Info("final text", "turn", turn+1, "chars", len(res.Text))
+			c.listener.turnCompleted(TurnCompletedEvent{
+				Turn:    turn + 1,
+				Final:   true,
+				TextLen: len(res.Text),
+			})
+			c.listener.agentCompleted(AgentCompletedEvent{
+				Text:      res.Text,
+				TurnsUsed: res.TurnsUsed,
+			})
 			// Append assistant response to history for multi-turn context
 			c.history = append(c.history, M{
 				"role":    "assistant",
@@ -86,7 +101,10 @@ func (c *Chat) UserMessage(ctx context.Context, text string) (ChatResult, error)
 			names[i] = tc.Name
 			res.ToolsCalled = append(res.ToolsCalled, tc.Name)
 		}
-		slog.Info("tool calls", "turn", turn+1, "count", len(toolCalls), "names", names)
+		c.listener.turnCompleted(TurnCompletedEvent{
+			Turn:      turn + 1,
+			ToolCalls: names,
+		})
 
 		// Append function_call items to history
 		for _, tc := range toolCalls {
@@ -102,7 +120,9 @@ func (c *Chat) UserMessage(ctx context.Context, text string) (ChatResult, error)
 		c.history = append(c.history, c.tools.execute(ctx, toolCalls)...)
 	}
 
-	return res, fmt.Errorf("tool calling did not finish within %d turns", c.cfg.MaxTurns)
+	err := fmt.Errorf("tool calling did not finish within %d turns", c.cfg.MaxTurns)
+	c.listener.agentFailed(AgentFailedEvent{Err: err, Turn: c.cfg.MaxTurns})
+	return res, err
 }
 
 // Usage tracks token usage across API calls.

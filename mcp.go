@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"os/exec"
 	"sync"
@@ -81,9 +80,10 @@ func (s *syncWriteCloser) Close() error {
 // MCPClient manages a connection to an MCP server over stdio.
 // When the context passed to NewMCPClient is canceled, the server process is killed.
 type MCPClient struct {
-	cmd    *exec.Cmd
-	stdin  *syncWriteCloser
-	nextID atomic.Int64
+	cmd      *exec.Cmd
+	stdin    *syncWriteCloser
+	nextID   atomic.Int64
+	listener *MCPListener
 
 	pendingMu sync.Mutex
 	pending   map[int64]chan *jsonRPCResponse
@@ -95,7 +95,7 @@ type MCPClient struct {
 // ConnectMCP loads config from the given path, spawns the named MCP server,
 // and performs the initialize handshake. The context controls the server
 // process lifetime.
-func ConnectMCP(ctx context.Context, configPath, serverName, cwd string) (*MCPClient, error) {
+func ConnectMCP(ctx context.Context, configPath, serverName, cwd string, listener *MCPListener) (*MCPClient, error) {
 	cfg, err := LoadMCPConfig(configPath)
 	if err != nil {
 		return nil, err
@@ -106,12 +106,12 @@ func ConnectMCP(ctx context.Context, configPath, serverName, cwd string) (*MCPCl
 		return nil, fmt.Errorf("MCP server %q not found in config", serverName)
 	}
 
-	return NewMCPClient(ctx, serverCfg, cwd)
+	return NewMCPClient(ctx, serverCfg, cwd, listener)
 }
 
 // NewMCPClient spawns an MCP server process and performs the initialize handshake.
 // The context controls the server process lifetime: canceling it kills the process.
-func NewMCPClient(ctx context.Context, cfg MCPServerConfig, cwd string) (*MCPClient, error) {
+func NewMCPClient(ctx context.Context, cfg MCPServerConfig, cwd string, listener *MCPListener) (*MCPClient, error) {
 	cmd := exec.CommandContext(ctx, cfg.Command, cfg.Args...)
 	cmd.Dir = cwd
 	cmd.Stderr = os.Stderr
@@ -131,14 +131,19 @@ func NewMCPClient(ctx context.Context, cfg MCPServerConfig, cwd string) (*MCPCli
 		return nil, fmt.Errorf("start MCP server: %w", err)
 	}
 
-	slog.Info("spawned MCP server", "command", cfg.Command, "args", cfg.Args, "pid", cmd.Process.Pid)
-
 	c := &MCPClient{
-		cmd:     cmd,
-		stdin:   &syncWriteCloser{wc: stdin},
-		pending: make(map[int64]chan *jsonRPCResponse),
-		done:    make(chan struct{}),
+		cmd:      cmd,
+		stdin:    &syncWriteCloser{wc: stdin},
+		listener: listener,
+		pending:  make(map[int64]chan *jsonRPCResponse),
+		done:     make(chan struct{}),
 	}
+
+	c.listener.spawned(MCPSpawnedEvent{
+		Command: cfg.Command,
+		Args:    cfg.Args,
+		Pid:     cmd.Process.Pid,
+	})
 
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024) // 10MB max line
@@ -164,7 +169,7 @@ func NewMCPClient(ctx context.Context, cfg MCPServerConfig, cwd string) (*MCPCli
 		return nil, fmt.Errorf("MCP initialized notification: %w", err)
 	}
 
-	slog.Info("MCP connected and initialized")
+	c.listener.connected(MCPConnectedEvent{})
 	return c, nil
 }
 
@@ -378,10 +383,10 @@ func (c *MCPClient) RegisterTools(ctx context.Context, t *Tools) error {
 			return result
 		}
 
-		slog.Info("registered MCP tool", "name", tool.Name)
+		c.listener.toolRegistered(MCPToolRegisteredEvent{Name: tool.Name})
 	}
 
-	slog.Info("registered MCP tools", "count", len(tools))
+	c.listener.allToolsRegistered(MCPAllToolsRegisteredEvent{Count: len(tools)})
 	return nil
 }
 
