@@ -3,6 +3,7 @@ package aisdk
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 )
 
@@ -48,6 +49,33 @@ func (v *VisionClient) QueryImage(ctx context.Context, imageData []byte, mimeTyp
 
 	v.listener.response(VisionResponseEvent{Text: text, Tokens: res.Usage})
 	return text, nil
+}
+
+// QueryImageTyped sends an image and question to the vision model with structured
+// output enabled. The JSON schema is inferred from T and the response is
+// unmarshalled into *T.
+func QueryImageTyped[T any](ctx context.Context, v *VisionClient, imageData []byte, mimeType, question string) (*T, error) {
+	b64 := base64.StdEncoding.EncodeToString(imageData)
+	dataURL := fmt.Sprintf("data:%s;base64,%s", mimeType, b64)
+
+	input := []M{{
+		"role": "user",
+		"content": []M{
+			{"type": "input_text", "text": question},
+			{"type": "input_image", "image_url": dataURL},
+		},
+	}}
+
+	result, res, err := DoTyped[T](ctx, v.client, input, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	v.usage.add(&res.Usage)
+
+	out, _ := json.Marshal(result)
+	v.listener.response(VisionResponseEvent{Text: string(out), Tokens: res.Usage})
+	return result, nil
 }
 
 // Usage returns the cumulative token usage for this client.
