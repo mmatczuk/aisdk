@@ -25,6 +25,18 @@ type ProviderConfig struct {
 	Endpoint string
 }
 
+// APIClient bundles provider configuration with HTTP transport.
+// It is the shared base for all API clients.
+type APIClient struct {
+	cfg  ProviderConfig
+	doer HTTPDoer
+}
+
+// NewAPIClient creates an APIClient.
+func NewAPIClient(cfg ProviderConfig, doer HTTPDoer) *APIClient {
+	return &APIClient{cfg: cfg, doer: doer}
+}
+
 // Well-known OpenRouter endpoints.
 const (
 	OpenRouterResponsesEndpoint       = "https://openrouter.ai/api/v1/responses"

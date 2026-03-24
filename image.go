@@ -27,23 +27,22 @@ type ImageOptions struct {
 
 // ImageGenConfig holds configuration for an ImageGenClient.
 type ImageGenConfig struct {
-	ProviderConfig
 	Model     string // model identifier (e.g. "google/gemini-2.0-flash-exp:free")
 	OutputDir string // directory where generated images are saved
 }
 
 // ImageGenClient generates and edits images via OpenRouter's Gemini image model.
 type ImageGenClient struct {
+	api      *APIClient
 	cfg      ImageGenConfig
-	doer     HTTPDoer
 	listener *ImageListener
 }
 
 // NewImageClient creates an ImageGenClient.
-func NewImageClient(cfg ImageGenConfig, doer HTTPDoer, listener *ImageListener) *ImageGenClient {
+func NewImageClient(api *APIClient, cfg ImageGenConfig, listener *ImageListener) *ImageGenClient {
 	return &ImageGenClient{
+		api:      api,
 		cfg:      cfg,
-		doer:     doer,
 		listener: listener,
 	}
 }
@@ -184,7 +183,7 @@ func (c *ImageGenClient) callOpenRouter(ctx context.Context, prompt string, refs
 		}
 	}
 
-	res, status, err := doJSONRequest[orResponse](ctx, c.doer, c.cfg.ProviderConfig, reqBody)
+	res, status, err := doJSONRequest[orResponse](ctx, c.api.doer, c.api.cfg, reqBody)
 	if err != nil {
 		return nil, err
 	}

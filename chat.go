@@ -2,6 +2,7 @@ package aisdk
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 )
 
@@ -15,19 +16,16 @@ type ChatResult struct {
 
 // ChatConfig holds configuration for a Chat.
 type ChatConfig struct {
-	ProviderConfig
-	Model           string // model identifier (e.g. "gpt-5-mini")
-	System          string // system prompt
-	MaxTurns        int    // max API round-trips per UserMessage call
-	MaxOutputTokens int    // max tokens in model response (0 for API default)
+	System   string // system prompt
+	MaxTurns int    // max API round-trips per UserMessage call
 }
 
 // Chat manages a persistent conversation with the Responses API,
 // including automatic tool dispatch.
 type Chat struct {
 	cfg      ChatConfig
+	client   *ResponsesClient
 	tools    *Tools
-	doer     HTTPDoer
 	listener *ChatListener
 
 	history []M
@@ -35,11 +33,11 @@ type Chat struct {
 }
 
 // NewChat creates a Chat.
-func NewChat(cfg ChatConfig, tools *Tools, doer HTTPDoer, listener *ChatListener) *Chat {
+func NewChat(cfg ChatConfig, client *ResponsesClient, tools *Tools, listener *ChatListener) *Chat {
 	c := &Chat{
 		cfg:      cfg,
+		client:   client,
 		tools:    tools,
-		doer:     doer,
 		listener: listener,
 	}
 
@@ -51,6 +49,24 @@ func NewChat(cfg ChatConfig, tools *Tools, doer HTTPDoer, listener *ChatListener
 	}
 
 	return c
+}
+
+func (c *Chat) callAPI(ctx context.Context) (*responsesResponse, error) {
+	var toolDefs json.RawMessage
+	if c.tools != nil {
+		var err error
+		toolDefs, err = c.tools.marshalDefs()
+		if err != nil {
+			return nil, fmt.Errorf("marshal tool definitions: %w", err)
+		}
+	}
+
+	res, err := c.client.Do(ctx, c.history, toolDefs)
+	if err != nil {
+		return nil, err
+	}
+	c.usage.add(&res.Usage)
+	return res, nil
 }
 
 // UserMessage sends a user message and runs the tool-calling loop until the

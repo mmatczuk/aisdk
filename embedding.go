@@ -8,21 +8,20 @@ import (
 
 // EmbeddingConfig holds configuration for an EmbeddingClient.
 type EmbeddingConfig struct {
-	ProviderConfig
 	Model string // model identifier (e.g. "openai/text-embedding-3-small")
 }
 
 // EmbeddingClient creates text embeddings via the OpenRouter Embeddings API.
 type EmbeddingClient struct {
-	cfg  EmbeddingConfig
-	doer HTTPDoer
+	api *APIClient
+	cfg EmbeddingConfig
 }
 
 // NewEmbeddingClient creates an EmbeddingClient.
-func NewEmbeddingClient(cfg EmbeddingConfig, doer HTTPDoer) *EmbeddingClient {
+func NewEmbeddingClient(api *APIClient, cfg EmbeddingConfig) *EmbeddingClient {
 	return &EmbeddingClient{
-		cfg:  cfg,
-		doer: doer,
+		api: api,
+		cfg: cfg,
 	}
 }
 
@@ -33,7 +32,7 @@ func (c *EmbeddingClient) Embed(ctx context.Context, text string) ([]float64, er
 		Input: text,
 	}
 
-	res, status, err := doJSONRequest[embeddingResponse](ctx, c.doer, c.cfg.ProviderConfig, reqBody)
+	res, status, err := doJSONRequest[embeddingResponse](ctx, c.api.doer, c.api.cfg, reqBody)
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +60,11 @@ func CosineSimilarity(a, b []float64) float64 {
 		normA += a[i] * a[i]
 		normB += b[i] * b[i]
 	}
-	return dot / (math.Sqrt(normA) * math.Sqrt(normB))
+	denom := math.Sqrt(normA) * math.Sqrt(normB)
+	if denom == 0 {
+		return 0
+	}
+	return dot / denom
 }
 
 // Embedding API request/response types.

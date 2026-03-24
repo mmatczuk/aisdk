@@ -90,13 +90,13 @@ func (t *Tools) marshalDefs() (json.RawMessage, error) {
 }
 
 // execute runs all tool calls concurrently and returns results in the same order.
-func (t *Tools) execute(ctx context.Context, calls []apiOutputItem) []M {
+func (t *Tools) execute(ctx context.Context, calls []responsesOutputItem) []M {
 	results := make([]M, len(calls))
 	var wg sync.WaitGroup
 
 	for i, call := range calls {
 		wg.Add(1)
-		go func(i int, call apiOutputItem) {
+		go func(i int, call responsesOutputItem) {
 			defer wg.Done()
 
 			handler, ok := t.handlers[call.Name]
