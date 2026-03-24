@@ -29,6 +29,7 @@ type ProviderConfig struct {
 const (
 	OpenRouterResponsesEndpoint       = "https://openrouter.ai/api/v1/responses"
 	OpenRouterChatCompletionsEndpoint = "https://openrouter.ai/api/v1/chat/completions"
+	OpenRouterEmbeddingsEndpoint      = "https://openrouter.ai/api/v1/embeddings"
 )
 
 // doJSONRequest marshals reqBody as JSON, POSTs it to cfg.Endpoint with Bearer auth,
