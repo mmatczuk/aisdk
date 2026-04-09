@@ -72,7 +72,11 @@ func doJSONRequest[Res any](ctx context.Context, doer HTTPDoer, cfg ProviderConf
 
 	r := new(Res)
 	if err := json.Unmarshal(resBody, r); err != nil {
-		return nil, 0, fmt.Errorf("unmarshal response (status %d): %w", res.StatusCode, err)
+		return nil, res.StatusCode, fmt.Errorf("unmarshal response (status %d, body: %s): %w", res.StatusCode, resBody, err)
+	}
+	if res.StatusCode != http.StatusOK {
+		// Log raw body so the full provider error is always visible.
+		fmt.Printf("API error response (status %d): %s\n", res.StatusCode, resBody)
 	}
 	return r, res.StatusCode, nil
 }
@@ -82,8 +86,8 @@ func checkAPIError(statusCode int, apiErr *apiError, prefix string) error {
 		return nil
 	}
 	msg := fmt.Sprintf("status %d", statusCode)
-	if apiErr != nil {
-		msg = apiErr.Message
+	if apiErr != nil && apiErr.Message != "" {
+		msg = fmt.Sprintf("status %d: %s", statusCode, apiErr.Message)
 	}
 	return fmt.Errorf("%s: %s", prefix, msg)
 }
